@@ -1,34 +1,38 @@
-# wipe_engine.py
+import os
 
-def wipe_file(file_path):
+def wipe_file(file_path, passes=3):
     """
-    Mode 1: Securely delete a targeted file/folder.
-    Steps:
-    1. Overwrite contents.
-    2. Delete entry from filesystem.
-    3. Verify.
+    Securely overwrite a file and delete it.
+    passes: how many overwrite passes to make.
     """
-    print(f"[Mode 1] Pretending to wipe file: {file_path}")
-    return True
+    if not os.path.isfile(file_path):
+        print(f"File not found: {file_path}")
+        return False
 
+    file_size = os.path.getsize(file_path)
+    try:
+        # Overwrite file with random data multiple times
+        with open(file_path, "r+b") as f:
+            for p in range(passes):
+                f.seek(0)
+                f.write(os.urandom(file_size))
+                f.flush()
+                os.fsync(f.fileno())  # ensure write to disk
+                print(f"Pass {p+1}/{passes} complete.")
 
-def wipe_partition(partition_name, is_os=False):
-    """
-    Mode 2b: Wipe a single partition.
-    - If OS partition → bootable media required.
-    - If non-OS → wipe directly.
-    """
-    if is_os:
-        print(f"[Mode 2.b] Partition {partition_name} contains OS. Bootable media required.")
-    else:
-        print(f"[Mode 2.b] Pretending to wipe non-OS partition: {partition_name}")
-    return True
+        # Optionally overwrite with zeros once
+        with open(file_path, "r+b") as f:
+            f.seek(0)
+            f.write(b"\x00" * file_size)
+            f.flush()
+            os.fsync(f.fileno())
+            print("Final zeroing pass complete.")
 
+        # Delete the file after overwriting
+        os.remove(file_path)
+        print(f"File securely wiped and deleted: {file_path}")
+        return True
 
-def wipe_full_device(device_name):
-    """
-    Mode 2a: Wipe entire device (all partitions).
-    Always requires bootable media.
-    """
-    print(f"[Mode 2.a] Full device wipe initiated on {device_name}. Bootable media required.")
-    return True
+    except Exception as e:
+        print(f"Error wiping file: {e}")
+        return False
