@@ -168,3 +168,38 @@ Verification status
 
 Timestamp + unique signature
 **note - no matter the mode, there will be certificate generation and will be tamper proof with a verifiable public key.
+
+
+
+
+
+
+Primary modes:
+
+File-level wipe (targeted files)
+
+Partition-level wipe (full or single partition)
+
+Drive support: HDD and SSD
+
+Wipe methods:
+
+HDD: multi-pass overwrite (0s and 1s, 3 passes)
+
+SSD: overwrite + encrypt + file delete, plus note about wear-leveling
+
+Verification:
+
+HDD: binary sampling of random offsets
+
+SSD: existence check and warning about traces
+
+Report generation:
+
+JSON, HTML, optional PDF
+
+SHA256 hash of file
+
+Signed report with private key
+
+Verification code for public verification

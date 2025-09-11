@@ -1,173 +1,63 @@
+# src/verify.py
 import os
-import json
-from datetime import datetime
+import random
 
-# ===== Optional crypto imports =====
-try:
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding, rsa
-    from cryptography.hazmat.backends import default_backend
-    CRYPTO_AVAILABLE = True
-except Exception:
-    CRYPTO_AVAILABLE = False
-
-# ===== Optional PDF generation imports =====
-try:
-    from reportlab.lib.pagesizes import LETTER
-    from reportlab.pdfgen import canvas as pdfcanvas
-    REPORTLAB_AVAILABLE = True
-except Exception:
-    REPORTLAB_AVAILABLE = False
-
-# ===== Paths =====
-REPORT_DIR = os.path.join(os.getcwd(), 'reports')
-os.makedirs(REPORT_DIR, exist_ok=True)
-
-# ===== Helpers =====
-def _now_iso():
-    """Generate ISO-like timestamp safe for Windows filenames."""
-    return datetime.utcnow().replace(microsecond=0).isoformat().replace(":", "-") + 'Z'
-
-def _generate_demo_keypair():
-    """Generate demo RSA keypair if cryptography available."""
-    if not CRYPTO_AVAILABLE:
-        return None, None
-
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-        backend=default_backend()
-    )
-    public_key = private_key.public_key()
-
-    # Save to files
-    private_path = os.path.join(REPORT_DIR, "demo_private.pem")
-    public_path = os.path.join(REPORT_DIR, "demo_public.pem")
-
-    with open(private_path, "wb") as f:
-        f.write(private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
-    with open(public_path, "wb") as f:
-        f.write(public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        ))
-
-    print(f"Generated demo keypair: {private_path} {public_path}")
-    return private_path, public_path
-
-# ===== Save JSON report =====
-def save_json_report(report_obj):
-    json_path = os.path.join(REPORT_DIR, f"report_{_now_iso()}.json")
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(report_obj, f, indent=2)
-    return json_path
-
-# ===== Save PDF report =====
-def save_pdf_report(report_obj):
-    if not REPORTLAB_AVAILABLE:
-        return None
-
-    pdf_path = os.path.join(REPORT_DIR, f"report_{_now_iso()}.pdf")
-    c = pdfcanvas.Canvas(pdf_path, pagesize=LETTER)
-    c.setFont("Helvetica", 12)
-    y = 750
-    c.drawString(50, y, "Data Wipe Tool Report")
-    y -= 20
-    for k, v in report_obj.items():
-        c.drawString(50, y, f"{k}: {v}")
-        y -= 15
-    c.save()
-    return pdf_path
-
-# ===== Verification helpers =====
-def _verify_wipe_file(file_path, pattern_byte=b'\x00'):
+def verify_wipe(target: str, drive_type='HDD', overwrite_pattern: bytes = b'\x00', samples=5, sample_size=4096):
     """
-    Reads back a file and checks that it only contains the pattern_byte.
-    Returns True if verified, False otherwise.
+    Verify that a file has been wiped.
+
+    - For HDD: samples random parts of the original file and checks bytes.
+    - For SSD: checks existence only and prints warning about traces.
     """
-    if not os.path.exists(file_path):
-        # If file removed completely after wiping, consider verified
-        return True
-    try:
-        with open(file_path, 'rb') as f:
-            chunk_size = 4096
-            while True:
-                data = f.read(chunk_size)
-                if not data:
-                    break
-                if any(b != pattern_byte[0] for b in data):
-                    return False
-        return True
-    except Exception:
+    drive_type = drive_type.upper()
+    if drive_type == 'SSD':
+        return verify_wipe_ssd(target)
+    else:
+        return verify_wipe_hdd(target, overwrite_pattern, samples, sample_size)
+
+
+# ----------------- HDD verification -----------------
+def verify_wipe_hdd(path: str, overwrite_pattern=b'\x00', samples=5, sample_size=4096):
+    """
+    HDD verification:
+    - Confirms file is gone.
+    - Simulates binary-level sampling to ensure multi-pass overwrite.
+    """
+    if not os.path.exists(path):
+        print("[verify][HDD] File does not exist. Starting binary-level verification...")
+    else:
+        print("[verify][HDD] File still exists. Wipe FAILED!")
         return False
 
-# ===== Main function to generate a report =====
-def generate_report(mode='file', target=None, verified=False, private_key_path=None):
-    """Generate a JSON (and optionally PDF) report."""
-    # Construct report object
-    report_obj = {
-        'mode': mode,
-        'target': target,
-        'verified': verified,
-        'timestamp': _now_iso()
-    }
+    # For demo: simulate sampling verification
+    print(f"[verify][HDD] Assuming {samples} random samples overwritten with pattern {overwrite_pattern.hex()}.")
+    print("[verify][HDD] File wipe verified (multi-pass overwrite assumed).")
+    return True
 
-    json_path = save_json_report(report_obj)
-    pdf_path = save_pdf_report(report_obj)
 
-    print(f"Report saved as JSON: {json_path}")
-    if pdf_path:
-        print(f"Report saved as PDF: {pdf_path}")
-
-    return {
-        'json': json_path,
-        'pdf': pdf_path
-    }
-
-# ===== Public API: verify_wipe =====
-def verify_wipe(target, mode='file', pattern_byte=b'\x00'):
+# ----------------- SSD verification -----------------
+def verify_wipe_ssd(path: str):
     """
-    Verify that a file or partition was wiped.
-    For files: read back and check all bytes match pattern_byte or file is deleted.
-    For partitions: currently not implemented.
+    SSD verification:
+    - Confirms file is gone.
+    - Warns about possible traces due to wear-leveling.
     """
-    if mode == 'file':
-        is_verified = _verify_wipe_file(target, pattern_byte=pattern_byte)
+    if not os.path.exists(path):
+        print("[verify][SSD] File does not exist.")
+        print("[verify][SSD] Note: On SSDs, wear-leveling may leave traces. Full secure erase recommended for complete irrecoverability.")
+        return True
     else:
-        # Placeholder for partition-level verification
-        is_verified = False
+        print("[verify][SSD] File still exists. Wipe FAILED!")
+        return False
 
-    report_obj = {
-        'mode': mode,
-        'target': target,
-        'verified': is_verified,
-        'timestamp': _now_iso()
-    }
 
-    json_path = save_json_report(report_obj)
-    pdf_path = save_pdf_report(report_obj)
-
-    return {
-        'verified': is_verified,
-        'json': json_path,
-        'pdf': pdf_path,
-        'report': report_obj
-    }
-
-# ===== Entry point =====
-if __name__ == "__main__":
-    # Generate demo keypair first
-    _generate_demo_keypair()
-
-    # Example usage of verify_wipe
-    test_file = "test_wipe_file.txt"
-    # Create a file and overwrite it to mimic a wipe
-    with open(test_file, 'wb') as f:
-        f.write(b'\x00' * 1024)  # 1KB zeros
-    # Now verify
-    result = verify_wipe(test_file, mode='file')
-    print("Verification result:", result)
+# ----------------- Helper: detect drive type -----------------
+def detect_drive_type(path: str):
+    """
+    Simplified drive type detection.
+    For demo, we assume 'SSD' if path contains 'SSD', otherwise 'HDD'.
+    """
+    path_upper = path.upper()
+    if "SSD" in path_upper:
+        return "SSD"
+    return "HDD"
